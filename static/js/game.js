@@ -243,35 +243,18 @@ elements.aiMode.addEventListener('click', () => {
 ===============================================
 */
 
-async function initializeGame() {
-    try {
-        const response = await fetch('/api/init_game', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                player1_name: gameState.playerName,
-                player2_name: gameState.opponentName,
-                mode: gameState.mode
-            })
-        });
+function initializeGame() {
+    // تهيئة اللعبة بدون API
+    gameState.scores = { X: 0, O: 0 };
+    gameState.round = 1;
+    
+    elements.player1Name.textContent = gameState.playerName;
+    elements.player2Name.textContent = gameState.opponentName;
 
-        const data = await response.json();
-
-        if (data.success) {
-            elements.player1Name.textContent = gameState.playerName;
-            elements.player2Name.textContent = gameState.opponentName;
-
-            updateScoreboard();
-            resetBoard();
-            showScreen('game');
-            showToast(`🎮 لنبدأ اللعب يا ${gameState.playerName}!`);
-        }
-    } catch (error) {
-        console.error('خطأ في تهيئة اللعبة:', error);
-        showToast('حدث خطأ! الرجاء التأكد من تشغيل السيرفر 🔧', 'error');
-    }
+    updateScoreboard();
+    resetBoard();
+    showScreen('game');
+    showToast(`🎮 لنبدأ اللعب يا ${gameState.playerName}!`);
 }
 
 /*
@@ -317,7 +300,7 @@ elements.cells.forEach(cell => {
     cell.addEventListener('click', () => handleCellClick(cell));
 });
 
-async function handleCellClick(cell) {
+function handleCellClick(cell) {
     const index = parseInt(cell.dataset.index);
 
     if (!gameState.isGameActive || gameState.board[index] !== null) {
@@ -328,84 +311,71 @@ async function handleCellClick(cell) {
         return;
     }
 
-    await makeMove(index);
+    makeMove(index);
 }
 
-async function makeMove(position) {
-    try {
-        const response = await fetch('/api/make_move', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ position })
-        });
+function makeMove(position) {
+    // التحقق من أن اللعبة نشطة
+    if (!gameState.isGameActive || gameState.board[position] !== null) {
+        return;
+    }
 
-        const data = await response.json();
+    // تنفيذ الحركة
+    gameState.board[position] = gameState.currentPlayer;
+    updateBoardDisplay();
 
-        if (data.success) {
-            gameState.board = data.board;
-            updateBoardDisplay();
+    // فحص الفائز
+    const winner = checkWinner(gameState.board);
+    let isDraw = false;
 
-            if (data.winner) {
-                handleWin(data.winner, data.scores, data.round);
-            } else if (data.is_draw) {
-                handleDraw();
-            } else {
-                gameState.currentPlayer = data.current_player;
-                updateCurrentPlayerDisplay();
+    if (winner) {
+        gameState.scores[winner] += 1;
+        handleWin(winner, gameState.scores, gameState.round);
+    } else if (isBoardFull(gameState.board)) {
+        isDraw = true;
+        handleDraw();
+    } else {
+        // تبديل اللاعب
+        gameState.currentPlayer = gameState.currentPlayer === 'X' ? 'O' : 'X';
+        updateCurrentPlayerDisplay();
 
-                if (gameState.mode === 'ai' && gameState.currentPlayer === 'O') {
-                    setTimeout(() => makeAIMove(), 500);
-                }
-            }
-        } else {
-            // عرض رسالة الخطأ من السيرفر
-            const errorMessage = data.error || 'حدث خطأ غير معروف';
-            showToast(errorMessage, 'error');
-            console.error('خطأ في تنفيذ الحركة:', errorMessage);
+        // إذا كان وضع AI ودور AI
+        if (gameState.mode === 'ai' && gameState.currentPlayer === 'O') {
+            setTimeout(() => makeAIMove(), 500);
         }
-    } catch (error) {
-        console.error('خطأ في تنفيذ الحركة:', error);
-        showToast('حدث خطأ في الاتصال! 🔧', 'error');
     }
 }
 
-async function makeAIMove() {
-    try {
-        const response = await fetch('/api/ai_move', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+function makeAIMove() {
+    // التحقق من أن اللعبة نشطة
+    if (!gameState.isGameActive) {
+        return;
+    }
 
-        const data = await response.json();
+    // الحصول على أفضل حركة للذكاء الاصطناعي
+    const bestMove = getBestMove(gameState.board, 'O', 'X');
+    
+    if (bestMove === null) {
+        return;
+    }
 
-        if (data.success) {
-            gameState.board = data.board;
-            updateBoardDisplay();
+    // تنفيذ الحركة
+    gameState.board[bestMove] = 'O';
+    updateBoardDisplay();
 
-            if (data.winner) {
-                handleWin(data.winner, data.scores, data.round);
-            } else if (data.is_draw) {
-                handleDraw();
-            } else {
-                gameState.currentPlayer = 'X';
-                updateCurrentPlayerDisplay();
-            }
-        } else {
-            // عرض رسالة الخطأ من السيرفر
-            const errorMessage = data.error || 'حدث خطأ غير معروف';
-            // لا نعرض toast للخطأ إذا كانت اللعبة انتهت (هذا طبيعي)
-            if (errorMessage !== 'اللعبة انتهت') {
-                showToast(errorMessage, 'error');
-            }
-            console.error('خطأ في حركة الذكاء الاصطناعي:', errorMessage);
-        }
-    } catch (error) {
-        console.error('خطأ في حركة الذكاء الاصطناعي:', error);
-        showToast('حدث خطأ في حركة الذكاء الاصطناعي! 🤖', 'error');
+    // فحص الفائز
+    const winner = checkWinner(gameState.board);
+    let isDraw = false;
+
+    if (winner) {
+        gameState.scores[winner] += 1;
+        handleWin(winner, gameState.scores, gameState.round);
+    } else if (isBoardFull(gameState.board)) {
+        isDraw = true;
+        handleDraw();
+    } else {
+        gameState.currentPlayer = 'X';
+        updateCurrentPlayerDisplay();
     }
 }
 
@@ -527,30 +497,12 @@ function showTournamentResults() {
 ===============================================
 */
 
-elements.nextRoundBtn.addEventListener('click', async () => {
-    try {
-        const response = await fetch('/api/next_round', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            gameState.round = data.round;
-            gameState.scores = data.scores;
-
-            elements.resultModal.classList.remove('active');
-            resetBoard();
-            updateScoreboard();
-            showToast(`🎮 الجولة ${data.round} - هيا نلعب!`);
-        }
-    } catch (error) {
-        console.error('خطأ في الانتقال للجولة التالية:', error);
-        showToast('حدث خطأ! 🔧', 'error');
-    }
+elements.nextRoundBtn.addEventListener('click', () => {
+    gameState.round += 1;
+    elements.resultModal.classList.remove('active');
+    resetBoard();
+    updateScoreboard();
+    showToast(`🎮 الجولة ${gameState.round} - هيا نلعب!`);
 });
 
 elements.closeModalBtn.addEventListener('click', () => {
